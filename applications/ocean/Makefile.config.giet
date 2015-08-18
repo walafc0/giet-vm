@@ -1,0 +1,72 @@
+
+#------------------------------------------------------------------------------
+# Default plateform architecture and default CPU
+#------------------------------------------------------------------------------
+GIET_DISTRIB= ../..
+
+#------------------------------------------------------------------------------
+# CC tools and parameters
+#------------------------------------------------------------------------------
+DIR_INC  = $(GIET_DISTRIB)/giet_libs
+DIR_LIB  = $(GIET_DISTRIB)/build/libs
+
+OBJ=$(DIR_LIB)/malloc.o $(DIR_LIB)/stdio.o $(DIR_LIB)/user_barrier.o $(DIR_LIB)/user_lock.o $(DIR_LIB)/stdlib.o $(DIR_LIB)/user_sqt_lock.o
+
+
+BASEDIR := $(PWD)
+MACROS := $(BASEDIR)/null_macros/c.m4.null.GIET
+M4 := m4 -s -Ulen -Uindex
+
+CFLAGSW := -Wmissing-prototypes -Wmissing-declarations -Wredundant-decls -Wdisabled-optimization -Winline -Wpointer-arith -Wsign-compare -Wendif-labels
+CFLAGSCPU = -mips32 -EL -G0 -mhard-float
+CFLAGS := $(CFLAGS) -O2 -g -Wall -fomit-frame-pointer $(CFLAGSW) $(CFLAGSCPU) -I$(DIR_INC) -I$(GIET_DISTRIB)
+
+
+ifneq ($(ADD-LDSCRIPT),)
+LDSCRIPT=$(ADD-LDSCRIPT)
+else
+LDSCRIPT=ocean.ld
+endif
+
+LDFLAGS := $(LDFLAGS) -L$(DIR_LIB) $(CPU-LFLAGS) -T$(LDSCRIPT) -lmath $(OBJ) $(ADD-LIBS)
+
+
+
+
+ifeq ($(TARGET),)
+	$(error *** Error: Variable TARGET must be defined before calling Makefile.config)
+endif
+
+ifeq ($(OBJS),)
+	$(error *** Error: Variable OBJS must be defined before calling Makefile.config)
+endif
+
+
+
+#------------------------------------------------------------------------------
+# Building rules
+#------------------------------------------------------------------------------
+
+.PHONY: clean
+
+
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(LD) -o $@ $^ $(LDFLAGS)
+
+%.h: %.H
+	$(M4) $(MACROS) $< > $@
+
+%.c: %.C $(MACROS)
+	$(M4) $(MACROS) $< > $@
+
+%.o: %.c $(MACROS)
+	$(CC) -c $(CFLAGS) -o $@ $<
+
+
+clean:
+	rm -f *.c *.h *.o *.pyc *.elf *.txt core *~
+
+
+

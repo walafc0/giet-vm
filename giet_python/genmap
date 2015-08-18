@@ -1,0 +1,352 @@
+#!/usr/bin/env python
+
+###################################################################################
+#   file   : genmap
+#   date   : april 2014
+#   author : Alain Greiner
+###################################################################################
+# This generic script maps one or several applications on a specific 
+# instance of the multi-processors/multi-clusters TSAR architecture. 
+# It generates the files required for hardware and software compilation:
+# 1) The "hard_config.h" file is used to generate the top.cpp file (hardware),
+#    and to compile the tsar_preloader.elf, GietVM boot.elf and kernel.elf files.
+# 2) The optionals "map.bin" and vsegs.ld" files are used to configure the GietVM.
+# 3) The optional "netbsd.dts" file can be used to configure NetBSD.
+# 4) The optional "netbsd.dts" file can be used to configure NetBSD.
+# 5) The optional "arch.bib" file can be used to configure ALMOS.
+# 6) An optional "map.xml" file can be generated for debug. 
+###################################################################################
+# The hardware parameters  are:
+#  - x_size    : number of clusters in a row
+#  - y_size    : number of clusters in a column
+#  - nb_procs  : number of processors per cluster
+#  - nb_ttys   : number of TTY channels 
+#  - fbf_size  : frame buffer width & heigth
+###################################################################################
+# The supported platforms are:
+# - tsar_generic_iob
+# - tsar_generic_leti
+# - tsar_geberic_mwmr
+###################################################################################
+# The supported applications are:
+# - classif
+# - convol 
+# - coproc
+# - dhrystone
+# - display
+# - gameoflife
+# - ocean
+# - raycast
+# - router 
+# - sort 
+# - shell
+# - transpose
+###################################################################################
+
+from optparse import OptionParser
+from mapping import *
+
+import sys
+
+###################################################################################
+#   define command line arguments   
+###################################################################################
+
+parser = OptionParser()
+
+parser.add_option( '--arch', type = 'string', dest = 'arch_path',
+                   help = 'define pathname to architecture' )
+
+parser.add_option( '--x', type = 'int', dest = 'x_size', 
+                   default = 2,
+                   help = 'define number of clusters in a row' )
+
+parser.add_option( '--y', type = 'int', dest = 'y_size', 
+                   default = 2,
+                   help = 'define number of clusters in a column' )
+
+parser.add_option( '--p', type = 'int', dest = 'nb_procs', 
+                   default = 2,
+                   help = 'define number of processors per cluster' )
+
+parser.add_option( '--tty', type = 'int', dest = 'nb_ttys', 
+                   default = 1,
+                   help = 'define number of tty channels' )
+
+parser.add_option( '--fbf', type = 'int', dest = 'fbf_size', 
+                   default = 128,
+                   help = 'define frame buffer width and heigth' )
+
+parser.add_option( '--ioc', type = 'string', dest = 'ioc_type',
+                   default = 'BDV',
+                   help = 'define type of IOC: BDV / HBA / SDC / RDK / SPI' )
+
+parser.add_option( '--v', action = 'store_true', dest = 'verbose',
+                   default = False,
+                   help = 'display detailed report on map.bin file generation' )
+
+parser.add_option( '--netbsd', type = 'string', dest = 'netbsd_path', 
+                   help = 'define pathname for the netbsd.dts file' )
+
+parser.add_option( '--linux', type = 'string', dest = 'linux_path', 
+                   help = 'define pathname for the linux.dts file' )
+
+parser.add_option( '--almos', type = 'string', dest = 'almos_path', 
+                   help = 'define pathname for the arch.bib file' )
+
+parser.add_option( '--giet', type = 'string', dest = 'giet_path', 
+                   help = 'define pathname for the map.bin & vsegs.ld file ' )
+
+parser.add_option( '--hard', type = 'string', dest = 'hard_path',
+                   help = 'define pathname for the hard_config.h file ' )
+
+parser.add_option( '--xml', type = 'string', dest = 'xml_path', 
+                   help = 'define pathname for the map.xml file' )
+
+############  supported applications   ############################################
+
+parser.add_option( '--classif', action = 'store_true', dest = 'classif',     
+                   default = False,
+                   help = 'map the "classif" application for the GietVM' )
+
+parser.add_option( '--convol', action = 'store_true', dest = 'convol',     
+                   default = False,
+                   help = 'map the "convol" application for the GietVM' )
+
+parser.add_option( '--coproc', action = 'store_true', dest = 'coproc',     
+                   default = False,
+                   help = 'map the "coproc" application for the GietVM' )
+
+parser.add_option( '--dhrystone', action = 'store_true', dest = 'dhrystone',     
+                   default = False,
+                   help = 'map the "dhrystone" application for the GietVM' )
+
+parser.add_option( '--display', action = 'store_true', dest = 'display',     
+                   default = False,
+                   help = 'map the "display" application for the GietVM' )
+
+parser.add_option( '--gameoflife', action = 'store_true', dest = 'gameoflife',     
+                   default = False,
+                   help = 'map the "gameoflife" application for the GietVM' )
+
+parser.add_option( '--ocean', action = 'store_true', dest = 'ocean',     
+                   default = False,
+                   help = 'map the "ocean" application for the GietVM' )
+
+parser.add_option( '--raycast', action = 'store_true', dest = 'raycast',     
+                   default = False,
+                   help = 'map the "raycast" application for the GietVM' )
+
+parser.add_option( '--router', action = 'store_true', dest = 'router',     
+                   default = False,
+                   help = 'map the "router" application for the GietVM' )
+
+parser.add_option( '--shell', action = 'store_true', dest = 'shell',     
+                   default = False,
+                   help = 'map the "shell" application for the GietVM' )
+
+parser.add_option( '--sort', action = 'store_true', dest = 'sort',     
+                   default = False,
+                   help = 'map the "sort" application for the GietVM' )
+
+parser.add_option( '--transpose', action = 'store_true', dest = 'transpose',
+                   default = False,
+                   help = 'map the "transpose" application for the GietVM' )
+
+###################################################################################
+#   Get command line arguments
+###################################################################################
+
+(options,args) = parser.parse_args()
+
+x_size         = options.x_size      # number of clusters in a row
+y_size         = options.y_size      # number of clusters in a column
+nb_procs       = options.nb_procs    # number of processors in a cluster
+nb_ttys        = options.nb_ttys     # number of TTY channels           
+fbf_size       = options.fbf_size    # frame buffer width & heigth
+ioc_type       = options.ioc_type    # ioc controller type
+
+verbose        = options.verbose     # report on map.bin generation if True
+
+netbsd_path    = options.netbsd_path # path for netbsd.dts file 
+linux_path     = options.linux_path  # path for linux.dts file 
+almos_path     = options.almos_path  # path for arch.bib file
+giet_path      = options.giet_path   # path for map.bin & vsegs.ld files
+hard_path      = options.hard_path   # path for the hard_config.h file
+
+arch_path      = options.arch_path   # path to selected architecture
+
+xml_path       = options.xml_path    # path for map.xml file     
+
+map_classif    = options.classif     # map "classif" application if True
+map_convol     = options.convol      # map "convol" application if True
+map_coproc     = options.coproc      # map "coproc" application if True
+map_dhrystone  = options.dhrystone   # map "dhrystone" application if True
+map_display    = options.display     # map "display" application if True
+map_gameoflife = options.gameoflife  # map "gameoflife" application if True
+map_ocean      = options.ocean       # map "ocean" application if True
+map_raycast    = options.raycast     # map "raycast" application if True
+map_router     = options.router      # map "router" application if True
+map_shell      = options.shell       # map "shell" application if True
+map_sort       = options.sort        # map "sort" application if True
+map_transpose  = options.transpose   # map "transpose" application if True
+
+###################################################################################
+#   build empty platform (no applications yet)
+###################################################################################
+
+if   ( arch_path == None  ):  
+    print 'You must select a generic architecture on the command line' 
+    sys.exit(1)
+
+# dynamically append the architecture to PYTHON path (directory pathname)
+sys.path.append( arch_path )
+
+# dynamically import the PYTHON mapping generator module (file name)
+select = __import__( 'arch' )
+
+# build mapping calling the function (function name)
+mapping = select.arch( x_size, y_size, nb_procs, nb_ttys, fbf_size, ioc_type )
+print '[genmap] platform %s build' % mapping.name 
+
+###################################################################################
+#   extend mapping with application(s) as required
+###################################################################################
+
+if ( map_classif ):      
+    appli = __import__( 'classif' )
+    appli.extend( mapping )
+    print '[genmap] application "classif" will be loaded'
+
+if ( map_convol ):   
+    appli = __import__( 'convol' )
+    appli.extend( mapping )
+    print '[genmap] application "convol" will be loaded'
+
+if ( map_coproc ):
+    appli = __import__( 'coproc' )
+    appli.extend( mapping )
+    print '[genmap] application "coproc" will be loaded'
+
+if ( map_dhrystone ):      
+    appli = __import__( 'dhrystone' )
+    appli.extend( mapping )
+    print '[genmap] application "dhrystone" will be loaded'
+
+if ( map_display ):      
+    appli = __import__( 'display' )
+    appli.extend( mapping )
+    print '[genmap] application "display" will be loaded'
+
+if ( map_gameoflife ):
+    appli = __import__( 'gameoflife' )
+    appli.extend( mapping )
+    print '[genmap] application "gameoflife" will be loaded'
+
+if ( map_ocean ):
+    appli = __import__( 'ocean' )
+    appli.extend( mapping )
+    print '[genmap] application "ocean" will be loaded'
+
+if ( map_raycast ):      
+    appli = __import__( 'raycast' )
+    appli.extend( mapping )
+    print '[genmap] application "raycast" will be loaded'
+
+if ( map_router ):      
+    appli = __import__( 'router' )
+    appli.extend( mapping )
+    print '[genmap] application "router" will be loaded'
+
+if ( map_shell ):
+    appli = __import__( 'shell' )
+    appli.extend( mapping )
+    print '[geneap] application "shell" will be loaded'
+
+if ( map_sort ):      
+    appli = __import__( 'sort' )
+    appli.extend( mapping )
+    print '[genmap] application "sort" will be loaded'
+
+if ( map_transpose ):
+    appli = __import__( 'transpose' )
+    appli.extend( mapping )
+    print '[genmap] application "transpose" will be loaded'
+
+###################################################################################
+#   Generate xml file if required.
+#   It can be used for debug.
+###################################################################################
+
+if ( xml_path != None ):
+    pathname = xml_path + '/map.xml'
+    f = open ( pathname, 'w' )
+    f.write( mapping.xml() )
+    print '[genmap] %s generated for debug' % pathname
+
+###################################################################################
+#   Generate netbsd.dts file if required.
+#   It is used for NetBSD configuration.
+###################################################################################
+
+if ( (netbsd_path != None) and (arch_path != None) ):
+    pathname = netbsd_path + '/netbsd.dts'
+    f = open ( pathname, 'w' )
+    f.write( mapping.netbsd_dts() )
+    print '[genmap] %s generated' % pathname
+
+###################################################################################
+#   Generate linux.dts file if required.
+#   It is used for LINUX configuration.
+###################################################################################
+
+if ( (linux_path != None) and (arch_path != None) ):
+    pathname = linux_path + '/linux.dts'
+    f = open ( pathname, 'w' )
+    f.write( mapping.linux_dts() )
+    print '[genmap] %s generated' % pathname
+
+###################################################################################
+#   Generate arch.bib file if required.
+#   It is used for ALMOS configuration.
+###################################################################################
+
+if ( (almos_path != None) and (arch_path != None) ):
+    pathname = almos_path + '/arch.info'
+    f = open ( pathname, 'w' )
+    f.write( mapping.almos_arch() )
+    print '[genmap] %s generated for almos' % pathname
+
+###################################################################################
+#   Generate map.bin, giet_vsegs.ld, and hard_config.h files if required.
+#   They are used for GietVM compilation and configuration.
+###################################################################################
+
+if ( (giet_path != None) and (arch_path != None) ):
+
+    pathname = giet_path + '/map.bin'
+    f = open ( pathname, 'w' )
+    f.write( str( mapping.cbin( verbose ) ) )
+    print '[genmap] %s generated for giet_vm' % pathname
+
+    pathname = giet_path + '/hard_config.h'
+    f = open ( pathname, 'w' )
+    f.write( mapping.hard_config() )
+    print '[genmap] %s generated for giet_vm' % pathname
+
+    pathname = giet_path + '/giet_vsegs.ld'
+    f = open ( pathname, 'w' )
+    f.write( mapping.giet_vsegs() )
+    print '[genmap] %s generated for giet_vm' % pathname
+
+###################################################################################
+#   Generate hard_config.h file if required.
+###################################################################################
+
+if ( hard_path != None ):
+
+    pathname = hard_path + '/hard_config.h'
+    f = open ( pathname, 'w' )
+    f.write( mapping.hard_config() )
+    print '[genmap] %s generated for %s' % (pathname, arch_path)
+

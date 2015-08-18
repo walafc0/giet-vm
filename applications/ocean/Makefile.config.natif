@@ -1,0 +1,32 @@
+CC := gcc
+CFLAGS := $(CFLAGS) -O0 -pthread -D_POSIX_C_SOURCE=200112 -g -Wall -W -Wmissing-prototypes \
+	-Wmissing-declarations -Wredundant-decls -Wdisabled-optimization \
+	-Winline -Wpointer-arith -Wsign-compare -Wendif-labels
+LDFLAGS := $(LDFLAGS) -lm
+
+BASEDIR := $(PWD)
+MACROS := $(BASEDIR)/null_macros/c.m4.null.POSIX
+M4 := m4 -s -Ulen -Uindex
+
+.PHONY: clean
+
+
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(CC) $(OBJS) $(CFLAGS) -o $(TARGET) $(LDFLAGS)
+
+
+%.h: %.H $(MACROS)
+	$(M4) $(MACROS) $< > $@
+
+%.c: %.C $(MACROS)
+	$(M4) $(MACROS) $< > $@
+
+%.o: %.c
+	$(CC) -c $(CFLAGS) -o $@ $<
+
+clean:
+	rm -rf *.c *.h *.o $(TARGET)
+
+

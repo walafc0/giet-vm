@@ -1,0 +1,15 @@
+TARGET = appli.elf
+OBJS = jacobcalc.o jacobcalc2.o laplacalc.o linkup.o main.o multi.o slave1.o slave2.o subblock.o giet_utils.o
+
+include Makefile.config.giet
+
+jacobcalc.o: jacobcalc.c decs.h giet_utils.h
+linkup.o: linkup.c decs.h giet_utils.h
+slave1.o: slave1.c decs.h giet_utils.h
+jacobcalc2.o: jacobcalc2.c decs.h giet_utils.h
+main.o: main.c decs.h giet_utils.h
+slave2.o: slave2.c decs.h giet_utils.h
+laplacalc.o: laplacalc.c decs.h giet_utils.h
+multi.o: multi.c decs.h giet_utils.h
+subblock.o: subblock.c decs.h giet_utils.h
+giet_utils.o: giet_utils.c giet_utils.h

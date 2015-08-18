@@ -1,0 +1,1494 @@
+/* -*- c++ -*-
+
+   C++ xml parser template classes
+
+   This file is part of the dpp library of C++ template classes
+
+   doc: http://diaxen.ssji.net/dpp/index.html
+   repo: https://www.ssji.net/svn/projets/trunk/libdpp
+
+   This program is free software: you can redistribute it and/or
+   modify it under the terms of the GNU Lesser General Public License
+   as published by the Free Software Foundation, either version 3 of
+   the License, or (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful, but
+   WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+   Lesser General Public License for more details.
+
+   You should have received a copy of the GNU Lesser General Public
+   License along with this program.  If not, see
+   <http://www.gnu.org/licenses/>.
+
+   (c) 2011 Alexandre Becoulet <alexandre.becoulet@free.fr>
+
+*/
+
+#ifndef DPP_XML_HH_
+#define DPP_XML_HH_
+
+/** @file @module{XML} */
+
+#include <map>
+#include <vector>
+#include <string>
+#include <sstream>
+#include <exception>
+#include <cassert>
+#include <cctype>
+
+namespace dpp {
+
+  template <class String> class xml_scanner_ns;
+  template <class String> class xml_scanner;
+
+  /**
+     @short XML error class
+     @module {XML}
+     @header dpp/xml
+   */
+  class xml_error : public std::exception
+  {
+    std::string _what;
+
+  public:
+
+    const char* what() const throw()
+    {
+      return _what.c_str();
+    }
+
+    xml_error(const char *msg, unsigned int line)
+    {
+      std::ostringstream s;
+      s << "XML:" << msg << " at line " << line;
+      _what = s.str();
+    }
+
+    ~xml_error() throw()
+    {
+    }
+  };
+
+  //////////////////////////////////////////////////////////////////////
+  //	XML scanner
+  //////////////////////////////////////////////////////////////////////
+
+  /** @internal */
+  template <class String>
+  class xml_scanner_base
+  {
+    template <class> friend class xml_scanner_ns;
+    template <class> friend class xml_scanner;
+
+  public:
+    /** @This starts XML document scanning. */
+    void scan() throw(xml_error)
+    {
+      process_root();
+    }
+
+  protected:
+    /** @internal */
+    xml_scanner_base(std::istream &i)
+      : _i(&i),
+	_depth(0),
+	_line(1)
+    {
+    }
+
+    /** @This is called on proper document end */
+    virtual void scan_end_doc()
+    {
+    }
+
+    /** @This is called on document start */
+    virtual void scan_start_doc()
+    {
+    }
+
+    /** @This is called for each XML header attribute found */
+    virtual void scan_header_value(const String &name, const String &value)
+    {
+    }
+
+    /** @This is called when a @tt CDATA section has been scand */
+    virtual void scan_cdata(const String &cdata)
+    {
+    }
+
+    /** @This is called when a comment has been scand */
+    virtual void scan_comment(const String &comment)
+    {
+    }
+
+    /** @This is called when a @tt{<! >} directive has been scand */
+    virtual void scan_directive(const String &dir)
+    {
+    }
+
+    /** @This is called when a @tt{<? ?>} instruction has been scand */
+    virtual void scan_instruction(const String &ins)
+    {
+    }
+
+    /** @This is called with content found before the next start/end tag */
+    virtual void scan_content(const String &content)
+    {
+    }
+
+    /** @This is called to substitute entity reference strings. The default
+	implementation handles predefined entities (@em amp, @em apos,
+	@em lt, @em gt and @em quot). */
+    virtual void scan_get_reference(String &ref)
+    {
+      if (ref == "amp")
+	ref = "&";
+      else if (ref == "apos")
+	ref = "'";
+      else if (ref == "gt")
+	ref = ">";
+      else if (ref == "lt")
+	ref = "<";
+      else if (ref == "quot")
+	ref = "\"";
+      else
+	ref = "";
+    }
+
+    /** @This returns current tags nesting level. */
+    unsigned int depth()
+    {
+      return _depth;
+    }
+
+    /** @This returns current line number. */
+    unsigned int line()
+    {
+      return _line;
+    }
+
+    /** @internal throw */
+    void error(const char *msg)
+    {
+      throw xml_error(msg, _line);
+    }
+
+  private:
+    int getc_eof()
+    {
+      char c;
+
+      _i->get(c);
+
+      if (_i->eof())
+	return -1;
+
+      if (!_i->good())
+	error("io error reading xml stream");
+
+      if (c == '\n')
+	_line++;
+
+      return (unsigned char)c;
+    }
+
+    int getc()
+    {
+      int c = getc_eof();
+
+      if (c < 0)
+	error("unexpected end of xml stream");
+
+      return c;
+    }
+
+    void putc(String &str, int c)
+    {
+      str += c;
+    }
+
+    void putc_data(String &str, int c)
+    {
+      switch (c)
+	{
+	case '&':
+	  switch (c = getc())
+	    {
+	      // character reference
+	    case '#': {
+	      int base = 10;
+	      int r = 0;
+	      while ((c = getc()) != ';')
+		{
+		  switch (c)
+		    {
+		    case 'x':
+		      base = 16;
+		      break;
+		    case '0': case '1': case '2': case '3': case '4':
+		    case '5': case '6': case '7': case '8': case '9':
+		      r = r * base + c - '0';
+		      break;
+		    case 'A': case 'B': case 'C':
+		    case 'D': case 'E': case 'F':
+		      r = r * base + 10 + c - 'A';
+		      break;
+		    case 'a': case 'b': case 'c':
+		    case 'd': case 'e': case 'f':
+		      r = r * base + 10 + c - 'a';
+		      break;
+		    default:
+		      error("bad escaping");
+		    }
+		}
+	      return putc(str, r);
+	    }
+
+	      // entity reference
+	    default: {
+	      String ref;
+	      do {
+		ref += c;
+		c = getc();
+	      } while (c != ';');
+	      scan_get_reference(ref);
+	      str += ref;
+	      return;
+	    }
+	    }
+
+	default:
+	  return putc(str, c);
+	}
+    }
+
+    void process_attr_value(String &value, int c)
+    {
+      for (; c != '='; c = getc())
+	if (c > 32)
+	  error("unexpected char in attribute name");
+      for (c = getc(); c != '"' && c != '\''; c = getc())
+	if (c > 32)
+	  error("unexpected char in attribute value");
+      int q = c;
+      for (c = getc(); c != q; c = getc())
+	putc_data(value, c);
+    }
+
+    void process_instruction()
+    {
+      _misc.clear();
+      while (1)
+	{
+	  int c = getc();
+
+	  switch (c)
+	    {
+	    case '?':
+	      if (getc() != '>')
+		error("unexpected char in instruction");
+	      return scan_instruction(_misc);
+
+	    case '"':
+	    case '\'': {
+	      int q = c;
+	      putc_data(_misc, c);
+	      for (c = getc(); c != q; c = getc())
+		putc_data(_misc, c);
+	    }
+
+	    default:
+	      putc(_misc, c);
+	    }
+	}
+    }
+
+    void process_comment()
+    {
+      int c1 = 0, c2 = 0;
+      while (1)
+	{
+	  int c = getc();
+
+	  switch (c)
+	    {
+	    case '>':
+	      if (c1 == '-' && c2 == '-')
+		{
+		  _misc.resize(_misc.size()-2);
+		  return scan_comment(_misc);
+		}
+
+	    default:
+	      c2 = c1;
+	      c1 = c;
+	      putc(_misc, c);
+	    }
+	}
+    }
+
+    void process_cdata()
+    {
+      int c1 = 0, c2 = 0;
+      while (1)
+	{
+	  int c = getc();
+
+	  switch (c)
+	    {
+	    case '>':
+	      if (c1 == ']' && c2 == ']')
+		{
+		  _misc.resize(_misc.size()-2);
+		  return scan_cdata(_misc);
+		}
+
+	    default:
+	      c2 = c1;
+	      c1 = c;
+	      putc(_misc, c);
+	    }
+	}
+    }
+
+    void process_directive()
+    {
+      _misc.clear();
+      while (1)
+	{
+	  int c = getc();
+
+	  switch (c)
+	    {
+	    case '[':
+	      for (const char *s = "CDATA["; *s; s++)
+		if (getc() != *s)
+		  error("bad directive");
+	      return process_cdata();
+
+	    case '-':
+	      if (getc() != '-')
+		error("bad directive");
+	      return process_comment();
+
+	    default: {
+	      int r = 0;
+	      if (_depth)
+		error("unexpected directive inside tag");
+	      do {
+		putc(_misc, c);
+		switch (c)
+		  {
+		  case '"':
+		  case '\'': {
+		    int q = c;
+		    for (c = getc(); c != q; c = getc())
+		      putc_data(_misc, c);
+		    putc_data(_misc, c);
+		    break;
+		  }
+		  case '[':
+		    r++;
+		    break;
+		  case ']':
+		    r--;
+		    break;
+		  }
+		c = getc();
+	      } while (r || c != '>');
+
+	      return scan_directive(_misc);
+	    }
+	    }
+	}
+    }
+
+    virtual void process_assignment(int c) = 0;
+
+    bool process_attributes()
+    {
+      while (1)
+	{
+	  int c = getc();
+
+	  switch (c)
+	    {
+	    case '>':
+	      return false;
+
+	    case '/':	
+	      c = getc();
+	      if (c != '>')
+		error("unexpected char in empty tag");
+	      return true;
+
+	    case ' ':
+	    case '\t':
+	    case '\r':
+	    case '\n':
+	      continue;
+
+	    default:
+	      process_assignment(c);
+	    }
+	}
+    }
+
+    virtual void process_start_tag_name(int c) = 0;
+    virtual void process_end_tag_name() = 0;
+
+    void process_end_tag_tail(int c)
+    {
+      while (c != '>')
+	{
+	  if (c > 32)
+	    error("unexpected char in end tag");
+	  c = getc();
+	}
+    }
+
+    void process_tag()
+    {
+      while (1)
+	{
+	  int c = getc();
+
+	  switch (c)
+	    {
+	    case '?':
+	      return process_instruction();
+	    case '!':
+	      return process_directive();
+
+	    case '/': {
+
+	      if (!_depth--)
+		error("unexpected end tag");
+
+	      process_end_tag_name();
+	      return;
+	    }
+
+	    case ' ':
+	    case '\t':
+	    case '\r':
+	    case '\n':
+	      continue;
+
+	    default:
+	      return process_start_tag_name(c);
+	    }
+	}
+    }
+
+    void process_root()
+    {
+      int c;
+
+      scan_start_doc();
+
+      do {
+	c = getc();
+      } while (c < 32);
+      for (const char *s = "<?xml"; *s; c = getc())
+	if (c > 32 && std::tolower(c) != *s++)
+	  error("bad header");
+      while (1)
+	{
+	  c = getc();
+	  switch (c)
+	    {
+	    case '?':
+	      goto hdr_done;
+
+	    case ' ':
+	    case '\t':
+	    case '\r':
+	    case '\n':
+	      break;
+
+	    default: {
+	      String attr, value;
+
+	      do {
+		putc(attr, c);
+		c = getc();
+	      } while (c > 32 && c != '=');
+
+	      process_attr_value(value, c);
+	      scan_header_value(attr, value);
+	    }
+	    }
+	}
+     hdr_done:
+      if (getc() != '>')
+	error("bad header end");
+
+      c = getc_eof();
+      while (1)
+	{
+	  switch (c)
+	    {
+	    case '<':
+	      process_tag();
+	      break;
+
+	    case -1:
+	      if (_depth)
+		error("unexpected end of xml stream");
+	      scan_end_doc();
+	      return;
+
+	    default: {
+	      String content;
+	      do {
+		putc_data(content, c);
+		c = getc_eof();
+	      } while (c > 0 && c != '<');
+	      scan_content(content);
+	      continue;
+	    }
+	    }
+	  c = getc_eof();
+	}
+    }
+
+  private:
+    std::istream *_i;
+    unsigned int _depth;
+    unsigned int _line;
+    String _misc;
+  };
+
+  /**
+     @short XML scanner
+     @module {XML}
+     @header dpp/xml
+     @see xml_event_parser
+
+     @This implements an XML scanner. Derived classes must override
+     some functions to handle XML scanning events.
+
+     @ref xml_error exception is thrown on syntax error. Start and
+     end tags count must be balanced but tags name missmatch is not checked
+     here.
+
+     The @tt String template parameter may be used to specify a
+     string class with optional wide characters support.
+
+     @section {Example}
+     @example test/test_xml_scanner.cc:scanner P
+     @example test/test_xml_scanner.cc:use
+     @end section
+   */
+  template <class String>
+  class xml_scanner : public xml_scanner_base<String>
+  {
+    typedef xml_scanner_base<String> base;
+    std::istringstream _ss;
+
+  public:
+    /** @This create an xml scanner for processing from input stream. */
+    xml_scanner(std::istream &i)
+      : xml_scanner_base<String>(i)
+    {
+    }
+
+    /** @This create an xml scanner for processing from string content. */
+    xml_scanner(const std::string &s)
+      : _ss(s),
+	xml_scanner_base<String>(_ss)
+    {
+    }
+
+  private:
+
+    void process_assignment(int c)
+    {
+      String attr, value;
+
+      do {
+	base::putc(attr, c);
+	c = base::getc();
+      } while (c > 32 && c != '=');
+
+      base::process_attr_value(value, c);
+      scan_attribute(attr, value);
+    }
+
+    void process_start_tag_name(int c)
+    {
+      String stag;
+      do {
+	base::putc(stag, c);
+	c = base::getc();
+      } while (c > 32 && c != '>' && c != '/');
+
+      if (c == '\n')
+	base::_line--;
+      base::_i->unget();
+
+      scan_start_tag(stag);
+      if (base::process_attributes())
+	scan_end_tag(stag);
+      else
+	base::_depth++;
+    }
+
+    void process_end_tag_name()
+    {
+      String etag;
+      int c;
+
+      while ((c = base::getc()) != '>' && c > 32)
+	base::putc(etag, c);
+
+      base::process_end_tag_tail(c);
+      scan_end_tag(etag);
+    }
+
+  protected:
+
+    /** @This is called for each start tag */
+    virtual void scan_start_tag(const String &start_tag)
+    {
+    }
+
+    /** @This is called for each end tag */
+    virtual void scan_end_tag(const String &end_tag)
+    {
+    }
+
+    /** @This is called for each attribute found in the preceding start tag */
+    virtual void scan_attribute(const String &name, const String &value)
+    {
+    }
+  };
+
+  /**
+     @short XML scanner with namespace support
+     @module {XML}
+     @header dpp/xml
+     @see xml_scanner
+
+     This class implements an XML scanner. This class is similar to
+     @xref{xml_scanner} but tag and attribute namespace name is
+     extracted.
+   */
+  template <class String>
+  class xml_scanner_ns : public xml_scanner_base<String>
+  {
+    typedef xml_scanner_base<String> base;
+
+    std::istringstream _ss;
+
+  public:
+
+    /** @This create an xml scanner for processing from input stream. */
+    xml_scanner_ns(std::istream &i)
+      : xml_scanner_base<String>(i)
+    {
+    }
+
+    /** @This create an xml scanner for processing from string content. */
+    xml_scanner_ns(const std::string &s)
+      : _ss(s),
+	xml_scanner_base<String>(_ss)
+    {
+    }
+
+  private:
+    void process_assignment(int c)
+    {
+      String xmlns, attr, value;
+
+      do {
+	base::putc(xmlns, c);
+	c = base::getc();
+      } while (c > 32 && c != '=' && c != ':');
+
+      if (c == ':') {
+	c = base::getc();
+	do {
+	  base::putc(attr, c);
+	  c = base::getc();
+	} while (c > 32 && c != '=');
+      }
+      else
+	attr.swap(xmlns);
+
+      base::process_attr_value(value, c);
+      scan_attribute(xmlns, attr, value);
+    }
+
+    void process_start_tag_name(int c)
+    {
+      String xmlns;
+      String stag;
+      do {
+	base::putc(xmlns, c);
+	c = base::getc();
+      } while (c > 32 && c != '>' && c != '/' && c != ':');
+
+      if (c == ':') {
+	c = base::getc();
+	do {
+	  base::putc(stag, c);
+	  c = base::getc();
+	} while (c > 32 && c != '>' && c != '/');
+      }
+      else
+	stag.swap(xmlns);
+
+      if (c == '\n')
+	base::_line--;
+      base::_i->unget();
+
+      scan_start_tag(xmlns, stag);
+      if (base::process_attributes())
+	scan_end_tag(xmlns, stag);
+      else
+	base::_depth++;
+    }
+
+    void process_end_tag_name()
+    {
+      String xmlns;
+      String etag;
+      int c;
+
+      while (1)
+	{
+	  c = base::getc();
+	  if (!((c != '>' && c != ':' && c > 32)))
+	    break;
+	  base::putc(xmlns, c);
+	}
+
+      if (c == ':') {
+	while (1)
+	  {
+	    c = base::getc();
+	    if (!((c != '>' && c > 32)))
+	      break;
+	    base::putc(etag, c);
+	  }
+      }
+      else
+	etag.swap(xmlns);
+
+      base::process_end_tag_tail(c);
+      scan_end_tag(xmlns, etag);
+    }
+
+  protected:
+
+    /** @This is called for each start tag */
+    virtual void scan_start_tag(const String &xmlns, const String &start_tag)
+    {
+    }
+
+    /** @This is called for each end tag */
+    virtual void scan_end_tag(const String &xmlns, const String &end_tag)
+    {
+    }
+
+    /** @This is called for each attribute found in the preceding start tag */
+    virtual void scan_attribute(const String &xmlns, const String &name, const String &value)
+    {
+    }
+  };
+
+  /** @internal */
+  struct empty
+  {
+  };
+
+  //////////////////////////////////////////////////////////////////////
+  //	XML event
+  //////////////////////////////////////////////////////////////////////
+
+  template <class String>
+  class xml_event_elements
+  {
+  protected:
+    typedef std::map<String, String> attributes_map_t;
+
+    /** @This is called for each parsed start tag.
+
+	Attributes list is passed as a non-const reference so that it
+	can be swapped with an other empty @ref std::map to avoid data copy.
+
+	@This is called once the new tag @tt Node object has
+	been pushed onto the processing stack, it can be accessed from
+	@this as well as other parsing functions by using the @ref
+	stack_top function.
+
+	@see parse_start_doc @see parse_end_tag
+     */
+    virtual void parse_start_tag(const String &name, attributes_map_t &attributes)
+    {
+    }
+
+    /** @This is called for each parsed end tag.
+
+	@This is called before the ended tag @tt Node object
+	is poped from the processing stack.
+
+	@see parse_start_tag
+    */
+    virtual void parse_end_tag(const String &name)
+    {
+    }
+
+    /** @This is called with content found before the next start/end tag */
+    virtual void parse_content(const String &content)
+    {
+    }
+
+    /** @This is called when a @tt CDATA section has been parsed */
+    virtual void parse_cdata(const String &cdata)
+    {
+    }
+  };
+
+  /**
+     @short XML event parser
+     @module {XML}
+     @header dpp/xml
+     @main
+     @see xml_scanner
+
+     @This implements an XML event based parser. A user @tt Node
+     type may be embedded in the internal processing stack to ease
+     building of in memory tree representation of XML documents (see @xref{example 2}).
+
+     The @tt String template parameter may be used to specify a
+     string class with optional wide characters support.
+
+     @ref xml_error exception is thrown on input error.
+
+     @section {Example 1}
+
+     In this example we simply reprint the XML document during parsing.
+
+     @example test/test_xml_event_parser.cc:parser P
+     @example test/test_xml_event_parser.cc:use
+     @end section
+
+     @section {Example 2}
+
+     In this example we use a @ref ref smart pointer to our @tt MyNode
+     structure to build a tree from XML input. The smart pointer
+     ensures that our tree is automatically freed even if an exception
+     is thrown during parsing.
+
+     @example test/test_xml_event_parser_tree.cc:node P
+     @example test/test_xml_event_parser_tree.cc:parser
+     @example test/test_xml_event_parser_tree.cc:use
+     @end section
+   */
+  template <class String, class Node = empty>
+  class xml_event_parser
+    : protected xml_scanner<String>
+    , public xml_event_elements<String>
+  {
+    typedef xml_scanner<String> base;
+  public:
+    typedef std::map<String, String> attributes_map_t;
+
+    /** @This forwards argument to @ref xml_scanner constructor */
+    template <typename T>
+    xml_event_parser(T &t)
+      : base(t)
+    {
+    }
+
+    /** @This starts XML parsing and returns document root @tt Node. */
+    Node parse() throw(xml_error)
+    {
+      try {
+	xml_scanner<String>::scan();
+      } catch (...) {
+	parse_error();
+	cleanup();
+	throw;
+      }
+
+      Node r = _stack.back()._tc;
+      cleanup();
+      return r;
+    }
+
+  protected:
+
+    using base::line;
+    using base::depth;
+
+    /** @This is called on XML document start.
+
+	XML header attributes list is passed as a non-const reference
+	so that it can be swaped with an other empty @ref std::map to
+	avoid data copy.
+
+	@This is called once the new tag @tt Node object has
+	been pushed onto the processing stack, it can be accessed by using
+	the @ref stack_top function.
+
+	@see parse_start_tag @see parse_end_doc
+     */
+    virtual void parse_start_doc(attributes_map_t &header_values)
+    {
+    }
+
+    /** @This is called on XML document parse end */
+    virtual void parse_end_doc()
+    {
+    }
+
+    /** @This is called when a "@tt{<! >}" directive has been parsed */
+    virtual void parse_directive(const String &dir)
+    {
+    }
+
+    /** @This is called when a comment has been parsed */
+    virtual void parse_comment(const String &comment)
+    {
+    }
+
+    /** @This is called when a "@tt{<? ?>}" instruction has been parsed */
+    virtual void parse_instruction(const String &ins)
+    {
+    }
+
+    /** @This is called when a parse error occurs, before the internal
+	stack is destroyed */
+    virtual void parse_error()
+    {
+    }
+
+    /** @This returns node on stack relative to stack top, -1 is stack top. */
+    Node & stack_top(int i)
+    {
+      return _stack[_stack.size() + i]._tc;
+    }
+
+    /** @This returns node on stack relative to stack bottom, 0 is stack bottom. */
+    Node & stack_bottom(int i)
+    {
+      return _stack[i]._tc;
+    }
+
+    /** @This returns current stack size */
+    size_t stack_size()
+    {
+      return _stack.size();
+    }
+
+  private:
+
+    /** @override */
+    void scan_cdata(const String &cdata)
+    {
+      (this->*_do_start)();
+      parse_cdata(cdata);
+    }
+
+    /** @override */
+    void scan_comment(const String &comment)
+    {
+      (this->*_do_start)();
+      parse_comment(comment);
+    }
+
+    /** @override */
+    void scan_directive(const String &dir)
+    {
+      (this->*_do_start)();
+      parse_directive(dir);
+    }
+
+    /** @override */
+    void scan_instruction(const String &ins)
+    {
+      (this->*_do_start)();
+      parse_instruction(ins);
+    }
+
+    /** @override */
+    void scan_content(const String &content)
+    {
+      (this->*_do_start)();
+      parse_content(content);
+    }
+
+    /** @override */
+    void scan_attribute(const String &name, const String &value)
+    {
+      _attr[name] = value;
+    }
+
+    /** @override */
+    void scan_start_tag(const String &start_tag)
+    {
+      (this->*_do_start)();
+      _attr.clear();
+      _started_tag = start_tag;
+      _do_start = &xml_event_parser::do_start_tag;
+    }
+
+    /** @override */
+    void scan_end_tag(const String &end_tag)
+    {
+      (this->*_do_start)();
+      assert(_stack.size() > 1);
+      if (_stack.back()._name != end_tag)
+	base::error("end tag name doesn't match");
+      parse_end_tag(_stack.back()._name);
+      _stack.pop_back();
+    }
+
+    /** @override */
+    void scan_start_doc()
+    {
+      _do_start = &xml_event_parser::do_start_doc;
+    }
+
+    /** @override */
+    void scan_header_value(const String &name, const String &value)
+    {
+      _attr[name] = value;
+    }
+
+    /** @override */
+    void scan_end_doc()
+    {
+      assert(_stack.size() == 1);
+      parse_end_doc();
+    }
+
+    void do_start_none()
+    {
+    }
+
+    void do_start_doc()
+    {
+      _do_start = &xml_event_parser::do_start_none;
+      _stack.push_back(stack_item(""));
+      parse_start_doc(_attr);
+    }
+
+    void do_start_tag()
+    {
+      _do_start = &xml_event_parser::do_start_none;
+      _stack.push_back(stack_item(_started_tag));
+      parse_start_tag(_started_tag, _attr);
+    }
+
+    void cleanup()
+    {
+      _stack.clear();
+      _attr.clear();
+      _started_tag.clear();
+    }
+
+    struct stack_item
+    {
+      stack_item(const String &name)
+	: _name(name), _tc()
+      {
+      }
+
+      String _name;
+      Node _tc;
+    };
+
+    std::vector<stack_item>  _stack;
+    std::map<String, String> _attr;
+    void (xml_event_parser::*_do_start)();
+    String _started_tag;
+  };
+
+  /**
+     @short XML event parser with namespace support
+     @module {XML}
+     @header dpp/xml
+     @main
+     @see xml_event_parser
+
+     This class implements an XML event based parser.
+   */
+
+  //////////////////////////////////////////////////////////////////////
+  //	XML dom
+  //////////////////////////////////////////////////////////////////////
+
+  class xml_dom_node;
+  inline std::ostream & operator<<(std::ostream &o, const xml_dom_node &node);
+
+  /**
+     @short XML dom node base class
+     @module {XML}
+     @header dpp/xml
+  */
+  class xml_dom_node
+  {
+    friend std::ostream & operator<<(std::ostream &o, const xml_dom_node &node);
+    template <class> friend class xml_dom_parser;
+    template <class> friend class xml_dom_parent_node;
+    template <class> friend class xml_dom_element;
+
+  protected:
+    virtual ~xml_dom_node()
+    {
+    }
+
+    void push_back(xml_dom_node *b)
+    {
+      xml_dom_node *a = this;
+      b->_prev = a;
+      a->_next->_prev = b;
+      b->_next = a->_next;
+      a->_next = b;
+    }
+
+    void push_front(xml_dom_node *b)
+    {
+      xml_dom_node *a = this;
+      b->_next = a;
+      a->_prev->_next = b;
+      b->_prev = a->_prev;
+      a->_prev = b;
+    }
+
+    bool empty() const
+    {
+      return _next == _prev;
+    }
+
+  private:
+    virtual void print(std::ostream &o) const
+    {
+    }
+
+    xml_dom_node *_next;
+    xml_dom_node *_prev;
+  };
+
+  inline std::ostream & operator<<(std::ostream &o, const xml_dom_node &node)
+  {
+    node.print(o);
+    return o;
+  }
+
+  /** @internal */
+  template <class String>
+  class xml_dom_parent_node : public xml_dom_node
+  {
+    template <class> friend class xml_dom_parser;
+
+  protected:
+    typedef xml_dom_node chld_base;
+    typedef xml_dom_node root_base;
+    typedef std::map<String, xml_dom_node *> child_hash_t;
+
+    xml_dom_parent_node()
+    {
+      _root._next = &_root;
+      _root._prev = &_root;
+    }
+
+    ~xml_dom_parent_node()
+    {
+      cleanup();
+    }
+
+    void print(std::ostream &o) const
+    {
+      for (xml_dom_node *i = _root._next; i != &_root; i = i->_next)
+	i->print(o);
+    }
+
+    void cleanup()
+    {
+      xml_dom_node *j;
+      for (xml_dom_node *i = _root._next; i != &_root; i = j)
+	{
+	  j = i->_next;
+	  delete i;
+	}
+    }
+
+    xml_dom_node _root;
+    child_hash_t _children;
+  };
+
+  /** @internal */
+  template <class String>
+  class xml_dom_attr_node
+  {
+    typedef std::map<String, String> attr_hash_t;
+
+  public:
+    /** @This returns a reference to attributes map */
+    const attr_hash_t &get_attributes() const
+    {
+      return _attrs;
+    }
+
+    /** @This returns a modifiable reference to attributes map */
+    attr_hash_t &get_attributes()
+    {
+      return _attrs;
+    }
+
+    /** @This returns value of the specified attribute or default a value */
+    const String &get_attribute(const String &name, const String &default_ = String())
+    {
+      typename attr_hash_t::const_iterator i = _attrs.find(name);
+
+      if (i == _attrs.end())
+	return default_;
+
+      return i->second;
+    }
+
+  protected:
+
+    void print_attr(std::ostream &o) const
+    {
+      for (typename attr_hash_t::const_iterator i = _attrs.begin();
+	   i != _attrs.end(); i++)
+	o << " " << i->first << "=\"" << i->second << "\"";
+    }
+
+    attr_hash_t _attrs;
+  };
+
+  /**
+     @short XML dom document root node
+     @module {XML}
+     @header dpp/xml
+  */
+  template <class String>
+  class xml_dom_doc
+    : public xml_dom_parent_node<String>
+    , public xml_dom_attr_node<String>
+  {
+    template <class> friend class xml_dom_parser;
+    typedef xml_dom_parent_node<String> base;
+
+    void print(std::ostream &o) const
+    {
+      o << "<?xml";
+      xml_dom_attr_node<String>::print_attr(o);
+      o << " ?>";
+      base::print(o);
+    }
+  };
+
+  /**
+     @short XML dom tag element
+     @module {XML}
+     @header dpp/xml
+  */
+  template <class String>
+  class xml_dom_element
+    : public xml_dom_parent_node<String>
+    , public xml_dom_attr_node<String>
+  {
+    template <class> friend class xml_dom_parser;
+    typedef xml_dom_parent_node<String> base;
+
+  public:
+    typedef std::map<String, String> attr_hash_t;
+
+    /** @This returns element name  */
+    const String &get_name() const
+    {
+    }
+
+    /** @This changes element name  */
+    void set_name(const String &name) const
+    {
+      _name = name;
+    }
+
+  private:
+    xml_dom_element(const String &name)
+      : _name(name)
+    {
+    }
+
+    void print(std::ostream &o) const
+    {
+      o << "<" << _name;
+      xml_dom_attr_node<String>::print_attr(o);
+      if (base::_root.empty())
+	o << " />";
+      else
+	{
+	  o << ">";
+	  base::print(o);
+	  o << "</" << _name << ">";
+	}
+    }
+
+    String _name;
+  };
+
+  /**
+     @short XML dom text and CDATA content node
+     @module {XML}
+     @header dpp/xml
+  */
+  template <class String>
+  class xml_dom_content : public xml_dom_node
+  {
+    template <class> friend class xml_dom_parser;
+
+  public:
+    /** @this returns content */
+    const String & get_content() const
+    {
+      return _content;
+    }
+
+    /** @this changes content */
+    void set_content(const String &content) const
+    {
+      _content = content;
+    }
+
+    /** @this returns true if content is in a CDATA section in xml file */
+    const bool is_cdata() const
+    {
+      return _is_cdata;
+    }
+
+  private:
+    xml_dom_content(const String &content, bool is_cdata = false)
+      : _content(content),
+	_is_cdata(is_cdata)
+    {
+    }
+
+    void print(std::ostream &o) const
+    {
+      if (_is_cdata)
+	o << "<![CDATA[" << _content << "]]>";
+      else
+	o << _content;
+    }
+
+    String _content;
+    bool _is_cdata;
+  };
+
+  /**
+     @short XML dom parser
+     @module {XML}
+     @header dpp/xml
+     @see xml_event_parser
+     @main
+
+     @This implements an XML dom parser. It builds an in memory
+     tree representation of the XML input.
+
+     The @ref parse function must be used to start XML input parsing.
+     Nodes can be used with @ref std::ostream objects to write XML
+     output.
+
+     The @tt String template parameter may be used to specify a
+     string class with optional wide characters support.
+
+     @ref xml_error exception is thrown on input error.
+
+     @section {Example}
+     @example test/test_xml_dom_parser.cc:read P
+     @end section
+  */
+  template <class String>
+  class xml_dom_parser : protected xml_event_parser<String, xml_dom_parent_node<String>*>
+  {
+    typedef xml_event_parser<String, xml_dom_parent_node<String>*> base;
+    typedef xml_dom_element<String> element_t;
+    typedef xml_dom_node node_t;
+
+  public:
+    typedef std::map<String, String> attributes_map_t;
+
+    /** @This forwards argument to @ref xml_event_parser constructor */
+    template <typename T>
+    xml_dom_parser(T &t)
+      : base(t)
+    {
+    }
+
+    /** @This parses input and returns the root node */
+    xml_dom_doc<String> * parse() throw(xml_error)
+    {
+      xml_dom_doc<String> *r;
+
+      try {
+	r = static_cast<xml_dom_doc<String>*>(base::parse());
+      } catch (...) {
+	throw;
+      }
+
+      return r;
+    }
+
+  private:
+
+    /** @override */
+    void parse_start_doc(attributes_map_t &attrs)
+    {
+      xml_dom_doc<String> *r = new xml_dom_doc<String>();
+      base::stack_top(-1) = r;
+      r->_attrs.swap(attrs);
+    }
+
+    /** @override */
+    void parse_start_tag(const String &name, attributes_map_t &attrs)
+    {
+      element_t *e = new xml_dom_element<String>(name);
+      base::stack_top(-1) = e;
+      e->_attrs.swap(attrs);
+    }
+
+    /** @override */
+    void parse_end_tag(const String &name)
+    {
+      base::stack_top(-2)->_root.push_front(base::stack_top(-1));
+    }
+
+    /** @override */
+    void parse_content(const String &content)
+    {
+      xml_dom_content<String> *c = new xml_dom_content<String>(content, false);
+      base::stack_top(-1)->_root.push_front(c);
+    }
+
+    /** @override */
+    void parse_cdata(const String &content)
+    {
+      xml_dom_content<String> *c = new xml_dom_content<String>(content, true);
+      base::stack_top(-1)->_root.push_front(c);
+    }
+
+    /** @override */
+    void parse_error()
+    {
+      for (size_t i = 0; i < base::stack_size(); i++)
+	delete base::stack_bottom(i);
+    }
+
+  };
+
+}
+
+#endif
+

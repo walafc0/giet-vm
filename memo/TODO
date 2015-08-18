@@ -1,0 +1,3 @@
++ Support for debug info
++ Search the sections by name, the name should correspond to vobj->name and the adresse should correspond to vseg->addresse
++ Documentation

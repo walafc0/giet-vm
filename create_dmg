@@ -1,0 +1,135 @@
+#!/bin/bash
+# Author: Cesar FUGUET
+# Date  : Novembre 2013
+
+clusters=65536
+sector_size=512
+sectors_per_cluster=8
+reserved_sectors=2048
+
+# FAT32 SPEC: The first two clusters are not present in the data region but
+# they are used in the computation of the FAT sectors
+data_region_clusters=$clusters-2
+
+let "data_sectors = data_region_clusters * sectors_per_cluster"
+let "fat_sectors  = (clusters * 4) / 512"
+
+# The disk image contains:
+#   - MBR sector : this sector is removed by this script as it will be copied
+#                  after)
+#   - Reserved region sectors (usually 32)
+#   - FAT region sectors
+#   - DATA region sectors
+let "sectors      = data_sectors + fat_sectors + reserved_sectors + 1" 
+
+platform=`uname`
+echo "Detected platform: $platform"
+
+if [[ $platform == "Darwin" ]]; then
+	case $1 in
+		create )
+			# Create disk image
+			# -fs        <fs>   : use filesystem <fs>
+			# -volname   <name> : use volume name <name>
+			# -srcfolder <src>  : copy every file in <src> into image
+			# -format    <fmt>  : format of image. UDRW (UDIF read/write image)
+			# -sectors   <sect> : size of image in 512-byte sectors
+			# -ov				: overwrite existing image file
+			# -fargs	 <args> : additional args to pass to newfs program 
+			#			     -F : FAT type (FAT32)
+			#				 -c : sector per cluster
+			#				 -n : number of FAT
+
+			if [[ -z $2 ]]; then
+				echo "Create action need second argument: <disk_image>"
+				exit 1;
+			fi;
+
+			# -F FAT type = 32 (FAT32)
+			# -c sectors/cluster
+			# -n number of FATs
+			# -r reserved sectors
+			# -k backup boot sector (VBR and FS INFO) = 0xffff (no backup)
+			echo "Creating empty disk image: $2.dmg"
+			fsargs="-F32 -c $sectors_per_cluster -n 1 -r $reserved_sectors -k 0xffff"
+
+			# -layout = NONE (No partition scheme. Hence no Master Boot Record)
+			hdiutil create \
+				-fs MS-DOS \
+				-volname virtualdisk \
+				-layout NONE \
+				-sectors $sectors \
+				-ov \
+				-fsargs "$fsargs" \
+				-type "UDIF" \
+				$2; 
+			;;
+
+		attach )
+			# Attach created disk image to the system and mount it
+			hdiutil attach $2
+			;;
+
+		detach )
+			# Detach attached device. Must pass as parameter the /dev/<device>
+			hdiutil detach $2
+			;;
+
+		info )
+			hdiutil imageinfo $2
+			;;
+
+		* )
+			echo "Pass the command as the first parameter: "
+			echo "  - create: create disk image"
+			echo "  - attach: attach created disk image to the system and "
+			echo "            mount it (arg: path to disk_image)"
+			echo "  - detach: detach specified device "
+			echo "            (arg: path to /dev/<device>)"
+			echo "  - info  : print information about created disk image"
+			echo "            (arg: path to disk_image)"
+			echo ""
+			echo "EXAMPLES:"
+			echo " ./create_diskimage.sh create disk_image"
+			echo " ./create_diskimage.sh attach /path/to/disk_image.dmg"
+			echo " ./create_diskimage.sh detach /dev/disk5"
+			echo " ./create_diskimage.sh info   /path/to/disk_image.dmg"
+			;;
+	esac;
+
+elif [[ $platform == "Linux" ]]; then
+	case $1 in
+		create )
+
+			if [[ -z $2 ]]; then
+				echo "Create action need second argument: <disk_image>"
+				exit 1;
+			fi;
+
+			echo "Creating empty disk image: $2"
+
+			let "sectors = (sectors - 1) / 2" 
+		    mkfs.vfat \
+				-C \
+				-F32 \
+				-f 1 \
+				-R $reserved_sectors \
+				-S $sector_size \
+				-s $sectors_per_cluster \
+				-v \
+				$2.dmg $sectors
+			;;
+
+		* )
+			echo "Pass the command as the first parameter: "
+			echo "  - create: create disk image"
+			echo ""
+			echo "EXAMPLES:"
+			echo " ./create_diskimage.sh create disk_image"
+			;;
+	esac;
+
+else
+	echo "Your platform is not supported: $platform"
+fi;
+

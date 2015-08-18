@@ -1,0 +1,115 @@
+divert(-1)
+define(NEWPROC,) dnl
+
+define(BARRIER, `{
+    unsigned int wait_start, wait_end;
+    unsigned int id = giet_thread_id();
+    
+    CLOCK(wait_start)
+    sqt_barrier_wait(&($1));
+    CLOCK(wait_end)
+    *gp[id].sync_time += wait_end - wait_start;
+    
+}')
+
+define(BARDEC, `
+giet_sqt_barrier_t ($1);
+')
+
+define(BARINIT, `{
+    giet_assert (nclusters_x * nclusters_y * procs_per_cluster == (unsigned int)$2, "Incorrect mesh for sqt_barrier\n");
+    
+    while (heap_inited != $2) {
+        asm volatile("nop\r\n");
+    }
+    giet_tty_printf("Tas initialisés\n");
+	sqt_barrier_init(&($1), nclusters_x, nclusters_y, procs_per_cluster);
+}')
+
+define(LOCKDEC, `sqt_lock_t ($1);')
+define(LOCKINIT, `{
+    sqt_lock_init(&($1), nclusters_x, nclusters_y, procs_per_cluster);
+}')
+define(LOCK, `{
+    unsigned int wait_start, wait_end;
+    unsigned int id = giet_thread_id();
+    CLOCK(wait_start)
+    sqt_lock_acquire(&($1));
+    CLOCK(wait_end)
+    *gp[id].sync_time += wait_end - wait_start;
+}')
+define(UNLOCK, `{sqt_lock_release(&($1));}')
+
+define(WAIT_FOR_END, `{
+	giet_tty_printf("Wait threads...\n");
+	BARRIER(bars->barrier)
+}')
+
+define(CREATE, `{
+    long id_main = 0;
+	run_threads = 1;
+   $1(&id_main);
+}')
+
+define(MAIN_INITENV, `{
+    giet_procs_number(&nclusters_x, &nclusters_y, &procs_per_cluster);
+	heap_init(0, 0);
+	heap_inited += procs_per_cluster;
+}')
+define(MAIN_END, `{exit(0); return 0;}')
+
+define(MAIN_ENV,`
+#include <user_sqt_lock.h>
+#include <user_barrier.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <malloc.h>
+#include "giet_utils.h"
+
+#define MAX_THREADS 512
+/*#include <pthread.h>
+#include <sys/time.h>
+#include <sys/fcntl.h>
+#include <sys/resource.h>
+#include <unistd.h>
+#include <stdlib.h>
+pthread_t PThreadTable[MAX_THREADS];
+*/
+')
+
+define(ENV, ` ')
+define(EXTERN_ENV, `
+
+#include <user_sqt_lock.h>
+#include <user_barrier.h>
+#include <stdio.h>
+#include <malloc.h>
+
+#include "giet_utils.h"
+
+/*#include <pthread.h>
+#include <sys/time.h>
+#include <sys/stat.h>
+#include <sys/resource.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+extern pthread_t PThreadTable[];*/
+')
+
+define(G_MALLOC, `ocean_malloc($1, $2);')
+
+define(CLOCK, `{
+   ($1) = giet_proctime();
+}')
+
+define(START_PHASE, `{
+    CLOCK(*gp[$1].step_start)
+}')
+define(END_PHASE, `{
+    unsigned int t;
+    CLOCK(t)
+    gp[$1].steps_time[($2)-1] += (double)t - *gp[$1].step_start;
+}')
+
+divert(0)

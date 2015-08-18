@@ -1,0 +1,15 @@
+TARGET = ocean
+OBJS = jacobcalc.o jacobcalc2.o laplacalc.o linkup.o main.o multi.o slave1.o slave2.o subblock.o global.o
+
+include Makefile.config.natif
+
+jacobcalc.o: jacobcalc.c decs.h
+linkup.o: linkup.c decs.h
+slave1.o: slave1.c decs.h
+jacobcalc2.o: jacobcalc2.c decs.h
+main.o: main.c decs.h
+slave2.o: slave2.c decs.h
+laplacalc.o: laplacalc.c decs.h
+multi.o: multi.c decs.h
+subblock.o: subblock.c decs.h
+global.o: global.c

@@ -1,0 +1,143 @@
+divert(-1)
+define(NEWPROC,) dnl
+
+define(BARRIER, `{
+   long int cycle;
+   int cancel, temp, error;
+   
+
+   error = pthread_mutex_lock(&($1).mutex);
+   if (error != 0) {
+      printf("Error while trying to get lock in barrier.\n");
+      exit(-1);
+   }
+
+   cycle = ($1).cycle;
+   if (++($1).counter != ($2)) {
+      pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel);
+      while (cycle == ($1).cycle) {
+         error = pthread_cond_wait(&($1).cv, &($1).mutex);
+         if (error != 0) {
+            break;
+         }
+      }
+      pthread_setcancelstate(cancel, &temp);
+   } else {
+      ($1).cycle = !($1).cycle;
+      ($1).counter = 0;
+      error = pthread_cond_broadcast(&($1).cv);
+   }
+   pthread_mutex_unlock(&($1).mutex);
+}')
+
+define(BARDEC, `
+struct {
+   pthread_mutex_t mutex;
+   pthread_cond_t cv;
+   long int counter;
+   long int cycle;
+} ($1);
+')
+
+define(BARINIT, `{
+   long int error;
+
+   error = pthread_mutex_init(&($1).mutex, NULL);
+   if (error != 0) {
+      printf("Error while initializing barrier.\n");
+      exit(-1);
+   }
+
+   error = pthread_cond_init(&($1).cv, NULL);
+   if (error != 0) {
+      printf("Error while initializing barrier.\n");
+      pthread_mutex_destroy(&($1).mutex);
+      exit(-1);
+   }
+
+   ($1).counter = 0;
+   ($1).cycle = 0;
+}')
+
+define(LOCKDEC, `pthread_mutex_t ($1);')
+define(LOCKINIT, `{pthread_mutex_init(&($1), NULL);}')
+define(LOCK, `{
+    pthread_mutex_lock(&($1));
+    }')
+define(UNLOCK, `{pthread_mutex_unlock(&($1));}')
+
+define(WAIT_FOR_END, `{
+   long int i, error;
+   for (i = 0; i < ($1) - 1; i++) {
+      error = pthread_join(PThreadTable[i], NULL);
+      if (error != 0) {
+         printf("Error in pthread_join().\n");
+         exit(-1);
+      }
+   }
+}')
+
+define(CREATE, `{
+   long i, error;
+
+   for (i = 0; i < ($2) - 1; i++) {
+      error = pthread_create(&PThreadTable[i], NULL, (void * (*)(void *))($1), &ids_procs[i+1]);
+      if (error != 0) {
+         printf("Error in pthread_create().\n");
+         exit(-1);
+      }
+   }
+   $1(&ids_procs[0]);
+}')
+
+define(MAIN_INITENV, `{;}')
+define(MAIN_END, `{exit(0);}')
+
+define(MAIN_ENV,`
+#include <pthread.h>
+#include <sys/time.h>
+#include <sys/fcntl.h>
+#include <sys/resource.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <time.h>
+#define MAX_THREADS 512
+pthread_t PThreadTable[MAX_THREADS];
+')
+
+define(ENV, ` ')
+define(EXTERN_ENV, `
+#include <stdio.h>
+#include <math.h>
+#include <time.h>
+#include <pthread.h>
+#include <sys/time.h>
+#include <sys/stat.h>
+#include <sys/resource.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+extern pthread_t PThreadTable[];
+')
+
+define(G_MALLOC, `malloc($1);')
+
+define(CLOCK, `{
+   struct timeval   FullTime;
+
+   gettimeofday(&FullTime, NULL);
+   ($1) = (unsigned long)(FullTime.tv_usec + FullTime.tv_sec * 1000000);
+}')
+
+define(START_PHASE, `{
+    CLOCK(*gp[$1].step_start)
+}')
+
+define(END_PHASE, `{
+    unsigned int t;
+    CLOCK(t)
+    gp[$1].steps_time[($2)-1] += (double)t - *gp[$1].step_start;
+}')
+
+divert(0)
